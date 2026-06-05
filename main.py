@@ -3,7 +3,9 @@ import time
 import logging
 import requests
 import yt_dlp
-from fastapi import FastAPI, Query, HTTPException, Path
+import httpx
+from fastapi import FastAPI, Query, HTTPException, Path, Request
+from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from ytmusicapi import YTMusic
 from typing import List, Optional
@@ -128,13 +130,23 @@ def extract_audio_stream(url_or_search: str) -> dict:
             'duration': entry.get('duration')
         }
 
+real_url_cache = {}
+
+def get_proxy_stream_url(video_id: str, real_url: str, request: Request) -> str:
+    global real_url_cache
+    real_url_cache[video_id] = real_url
+    base_url = str(request.base_url).rstrip('/')
+    return f"{base_url}/stream-media/{video_id}"
+
 @app.get("/stream")
-def stream_by_query(query: str = Query(..., description="Query or direct URL")):
+def stream_by_query(request: Request, query: str = Query(..., description="Query or direct URL")):
     global stream_cache
     if query in stream_cache:
         cached = stream_cache[query]
         if time.time() < cached['expires']:
-            return cached['data']
+            result = cached['data'].copy()
+            result['stream_url'] = get_proxy_stream_url(result['id'], result['stream_url'], request)
+            return result
         else:
             del stream_cache[query]
 
@@ -142,9 +154,10 @@ def stream_by_query(query: str = Query(..., description="Query or direct URL")):
         search_target = query if (query.startswith("http://") or query.startswith("https://")) else f"ytsearch1:{query}"
         result = extract_audio_stream(search_target)
         stream_cache[query] = {
-            'data': result,
+            'data': result.copy(),
             'expires': time.time() + CACHE_DURATION
         }
+        result['stream_url'] = get_proxy_stream_url(result['id'], result['stream_url'], request)
         return result
     except yt_dlp.utils.DownloadError as de:
         error_msg = str(de)
@@ -155,12 +168,14 @@ def stream_by_query(query: str = Query(..., description="Query or direct URL")):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/stream/{video_id}")
-def stream_by_video_id(video_id: str = Path(..., description="Video ID")):
+def stream_by_video_id(video_id: str = Path(..., description="Video ID"), request: Request = None):
     global stream_cache
     if video_id in stream_cache:
         cached = stream_cache[video_id]
         if time.time() < cached['expires']:
-            return cached['data']
+            result = cached['data'].copy()
+            result['stream_url'] = get_proxy_stream_url(result['id'], result['stream_url'], request)
+            return result
         else:
             del stream_cache[video_id]
 
@@ -168,9 +183,10 @@ def stream_by_video_id(video_id: str = Path(..., description="Video ID")):
         url = f"https://www.youtube.com/watch?v={video_id}"
         result = extract_audio_stream(url)
         stream_cache[video_id] = {
-            'data': result,
+            'data': result.copy(),
             'expires': time.time() + CACHE_DURATION
         }
+        result['stream_url'] = get_proxy_stream_url(result['id'], result['stream_url'], request)
         return result
     except yt_dlp.utils.DownloadError as de:
         error_msg = str(de)
@@ -179,6 +195,52 @@ def stream_by_video_id(video_id: str = Path(..., description="Video ID")):
         raise HTTPException(status_code=500, detail=error_msg)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/stream-media/{video_id}")
+async def stream_media(video_id: str, request: Request):
+    global real_url_cache
+    real_url = real_url_cache.get(video_id)
+    if not real_url:
+        try:
+            url = f"https://www.youtube.com/watch?v={video_id}"
+            res = extract_audio_stream(url)
+            real_url = res['stream_url']
+            real_url_cache[video_id] = real_url
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to resolve stream: {e}")
+
+    headers = {}
+    client_range = request.headers.get("range")
+    if client_range:
+        headers["Range"] = client_range
+        
+    headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+
+    try:
+        client = httpx.AsyncClient()
+        req = client.build_request("GET", real_url, headers=headers)
+        r = await client.send(req, stream=True)
+        
+        response_headers = {}
+        for h in ["Content-Range", "Accept-Ranges", "Content-Length", "Content-Type"]:
+            if r.headers.get(h):
+                response_headers[h] = r.headers.get(h)
+
+        async def bytes_generator():
+            try:
+                async for chunk in r.aiter_bytes():
+                    yield chunk
+            finally:
+                await r.aclose()
+                await client.aclose()
+
+        return StreamingResponse(
+            bytes_generator(),
+            status_code=r.status_code,
+            headers=response_headers
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Streaming proxy error: {e}")
 
 @app.get("/lyrics")
 def get_lyrics(title: str = Query(...), artist: str = Query(...)):
