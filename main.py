@@ -58,6 +58,11 @@ def extract_audio_stream(url_or_search: str) -> dict:
         'check_formats': False,
         'youtube_include_dash_manifest': False,
         'youtube_include_hls_manifest': False,
+        'extractor_args': {
+            'youtube': {
+                'player_client': ['ios', 'android', 'web_music', 'tv'],
+            }
+        },
         'userAgent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     }
     if cookie_file:
