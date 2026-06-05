@@ -278,14 +278,49 @@ import subprocess
 
 @app.get("/debug")
 def debug_info():
+    import io
+    
+    log_capture = io.StringIO()
+    ydl_opts = {
+        'quiet': False,
+        'no_playlist': True,
+        'extract_flat': False,
+        'skip_download': True,
+        'check_formats': False,
+        'remote_components': {'ejs:github'},
+        'extractor_args': {
+            'youtube': {
+                'player_client': ['default', '-android_sdkless'],
+            }
+        },
+        'cookiefile': 'cookies.txt' if os.path.exists('cookies.txt') else None
+    }
+    
+    class MyLogger(object):
+        def debug(self, msg):
+            log_capture.write(msg + "\n")
+        def info(self, msg):
+            log_capture.write(msg + "\n")
+        def warning(self, msg):
+            log_capture.write("WARNING: " + msg + "\n")
+        def error(self, msg):
+            log_capture.write("ERROR: " + msg + "\n")
+
+    ydl_opts['logger'] = MyLogger()
+    
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.extract_info('https://www.youtube.com/watch?v=WC7UTfWVuAU', download=False)
+            success = True
+    except Exception as e:
+        log_capture.write(f"EXCEPTION: {e}\n")
+        success = False
+
     return {
-        "version": "debug-v1",
-        "deno_path": shutil.which("deno"),
+        "version": "debug-v2",
+        "success": success,
+        "logs": log_capture.getvalue().split("\n"),
         "node_path": shutil.which("node"),
-        "cookies_exist": os.path.exists("cookies.txt"),
-        "cookies_size": os.path.getsize("cookies.txt") if os.path.exists("cookies.txt") else 0,
-        "path_env": os.environ.get("PATH"),
-        "deno_version": subprocess.getoutput("deno --version") if shutil.which("deno") else None,
         "node_version": subprocess.getoutput("node -v") if shutil.which("node") else None,
     }
 
