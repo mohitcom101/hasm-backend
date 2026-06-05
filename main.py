@@ -62,7 +62,7 @@ def extract_audio_stream(url_or_search: str) -> dict:
         'js_runtimes': {'deno': {}},
         'extractor_args': {
             'youtube': {
-                'player_client': ['ios', 'android', 'web_music', 'tv'],
+                'player_client': ['default', '-android_sdkless'],
             }
         },
         'userAgent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
