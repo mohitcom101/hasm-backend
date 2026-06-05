@@ -59,6 +59,7 @@ def extract_audio_stream(url_or_search: str) -> dict:
         'youtube_include_dash_manifest': False,
         'youtube_include_hls_manifest': False,
         'remote_components': {'ejs:github'},
+        'js_runtimes': {'node': {}},
         'extractor_args': {
             'youtube': {
                 'player_client': ['default', '-android_sdkless'],
@@ -288,6 +289,7 @@ def debug_info():
         'skip_download': True,
         'check_formats': False,
         'remote_components': {'ejs:github'},
+        'js_runtimes': {'node': {}},
         'extractor_args': {
             'youtube': {
                 'player_client': ['default', '-android_sdkless'],
