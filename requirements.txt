@@ -4,3 +4,5 @@ yt-dlp
 ytmusicapi
 requests
 gunicorn
+fastapi
+uvicorn
