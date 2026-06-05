@@ -274,6 +274,22 @@ def resolve_metadata(video_id: str = Query(...), title: str = Query(...), artist
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+import shutil
+import subprocess
+
+@app.get("/debug")
+def debug_info():
+    return {
+        "version": "debug-v1",
+        "deno_path": shutil.which("deno"),
+        "node_path": shutil.which("node"),
+        "cookies_exist": os.path.exists("cookies.txt"),
+        "cookies_size": os.path.getsize("cookies.txt") if os.path.exists("cookies.txt") else 0,
+        "path_env": os.environ.get("PATH"),
+        "deno_version": subprocess.getoutput("deno --version") if shutil.which("deno") else None,
+        "node_version": subprocess.getoutput("node -v") if shutil.which("node") else None,
+    }
+
 
 @app.get("/home")
 def home():
