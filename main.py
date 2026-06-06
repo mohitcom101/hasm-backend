@@ -4,7 +4,7 @@ import logging
 import requests
 import yt_dlp
 import httpx
-from fastapi import FastAPI, Query, HTTPException, Path, Request
+from fastapi import FastAPI, Query, HTTPException, Path, Request, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from ytmusicapi import YTMusic
@@ -131,6 +131,27 @@ def extract_audio_stream(url_or_search: str) -> dict:
         }
 
 real_url_cache = {}
+
+def prefetch_songs_task(video_ids: List[str]):
+    global stream_cache, real_url_cache
+    for video_id in video_ids:
+        # Check if already cached and valid
+        if video_id in stream_cache:
+            cached = stream_cache[video_id]
+            if time.time() < cached['expires']:
+                continue
+        try:
+            logger.info(f"[Background Prefetch] Resolving stream for ID: {video_id}")
+            url = f"https://www.youtube.com/watch?v={video_id}"
+            result = extract_audio_stream(url)
+            stream_cache[video_id] = {
+                'data': result,
+                'expires': time.time() + CACHE_DURATION
+            }
+            real_url_cache[video_id] = result['stream_url']
+            logger.info(f"[Background Prefetch] Successfully resolved stream for ID: {video_id}")
+        except Exception as e:
+            logger.warning(f"[Background Prefetch] Failed resolving stream for ID {video_id}: {e}")
 
 def get_proxy_stream_url(video_id: str, real_url: str, request: Request) -> str:
     global real_url_cache
@@ -261,7 +282,7 @@ def get_lyrics(title: str = Query(...), artist: str = Query(...)):
         return {'synced_lyrics': None, 'plain_lyrics': "Lyrics unavailable."}
 
 @app.get("/search")
-def search(q: str = Query(...)):
+def search(q: str = Query(...), background_tasks: BackgroundTasks = None):
     if not ytmusic:
         raise HTTPException(status_code=500, detail="YTMusic not initialized.")
     try:
@@ -295,6 +316,8 @@ def search(q: str = Query(...)):
                     'thumbnail': thumbnail,
                     'duration': res.get('duration')
                 })
+        if background_tasks and len(songs) > 0:
+            background_tasks.add_task(prefetch_songs_task, [s['id'] for s in songs[:3]])
         return songs
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -390,7 +413,7 @@ def debug_info():
 
 
 @app.get("/home")
-def home():
+def home(background_tasks: BackgroundTasks = None):
     if not ytmusic:
         raise HTTPException(status_code=500, detail="YTMusic not initialized.")
     try:
@@ -424,12 +447,14 @@ def home():
                     'thumbnail': thumbnail,
                     'duration': res.get('duration')
                 })
+        if background_tasks and len(songs) > 0:
+            background_tasks.add_task(prefetch_songs_task, [s['id'] for s in songs[:5]])
         return songs
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/upnext")
-def upnext(video_id: str = Query(...)):
+def upnext(video_id: str = Query(...), background_tasks: BackgroundTasks = None):
     if not ytmusic:
         raise HTTPException(status_code=500, detail="YTMusic not initialized.")
     try:
@@ -470,6 +495,8 @@ def upnext(video_id: str = Query(...)):
                 'thumbnail': thumbnail,
                 'duration': duration_str
             })
+        if background_tasks and len(songs) > 0:
+            background_tasks.add_task(prefetch_songs_task, [s['id'] for s in songs[:2]])
         return songs
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
