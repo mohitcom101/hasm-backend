@@ -33,8 +33,15 @@ if _cookies_env:
     logger.info("Created cookies.txt from COOKIES_CONTENT.")
 
 try:
-    ytmusic = YTMusic()
-    logger.info("YTMusic Client initialized.")
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': '*/*',
+        'Accept-Language': 'en-US,en;q=0.9',
+    }
+    session = requests.Session()
+    session.headers.update(headers)
+    ytmusic = YTMusic(requests_session=session)
+    logger.info("YTMusic Client initialized with custom session headers.")
 except Exception as e:
     logger.error(f"Failed to initialize YTMusic: {e}")
     ytmusic = None
